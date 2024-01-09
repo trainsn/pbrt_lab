@@ -51,47 +51,47 @@ bool Micky::Intersect(const Ray &r, Float *tHit, SurfaceInteraction *isect,
     bool hitLeft = sphereLeft.Intersect(r, &tHitL, &isectL, testAlphaTexture);
     bool hitRight = sphereRight.Intersect(r, &tHitR, &isectR, testAlphaTexture);
     // std::printf("tHitHead: %f, tHitL: %f, tHitR: %f\n", tHitHead, tHitL, tHitR);
-    std::printf("hitHead: %d, hitLeft: %d, hitRight: %d\n", hitHead, hitLeft, hitRight);
+    // std::printf("hitHead: %d, hitLeft: %d, hitRight: %d\n", hitHead, hitLeft, hitRight);
 
     if(hitHead){
-        std::printf("hitHead!!! %f %f %f \n", tHitHead, isectHead.uv.x, isectHead.uv.y);
-        tHit = &tHitHead;
-        isect = &isectHead;
+        // std::printf("hitHead!!! %f %f %f \n", tHitHead, isectHead.uv.x, isectHead.uv.y);
+        *tHit = tHitHead;
+        *isect = isectHead;
         if (hitLeft){
-            std::printf("hitLeft!!! %f %f %f \n", tHitL, isectL.uv.x, isectL.uv.y);
+            // std::printf("hitLeft!!! %f %f %f \n", tHitL, isectL.uv.x, isectL.uv.y);
             if(tHitL < *tHit) {
-                tHit = &tHitL;
-                isect = &isectL;
+                *tHit = tHitL;
+                *isect = isectL;
             }
         }
         if (hitRight){
-            std::printf("hitRight!!! %f %f %f \n", tHitR, isectR.uv.x, isectR.uv.y);
+            // std::printf("hitRight!!! %f %f %f \n", tHitR, isectR.uv.x, isectR.uv.y);
             if(tHitR < *tHit){
-                tHit = &tHitR;
-                isect = &isectR;
+                *tHit = tHitR;
+                *isect = isectR;
             }
         }
         return true;
     }
-    else if (hitLeft){
-        std::printf("hitLeft2!!! %f %f %f \n", tHitL, isectL.uv.x, isectL.uv.y);
-        tHit = &tHitL;
-        isect = &isectL;
-        if (hitRight){
-            std::printf("hitRight2!!! %f %f %f \n", tHitR, isectR.uv.x, isectR.uv.y);
-            if(tHitR < *tHit){
-                tHit = &tHitR;
-                isect = &isectR;
-            }
-        }
-        return true;
-    }
-    else if (hitRight){
-        std::printf("hitRight3!!! %f %f %f \n", tHitR, isectR.uv.x, isectR.uv.y);
-        tHit = &tHitR;
-        isect = &isectR;
-        return true;
-    }
+     else if (hitLeft){
+         // std::printf("hitLeft2!!! %f %f %f \n", tHitL, isectL.uv.x, isectL.uv.y);
+         *tHit = tHitL;
+         *isect = isectL;
+         if (hitRight){
+             // std::printf("hitRight2!!! %f %f %f \n", tHitR, isectR.uv.x, isectR.uv.y);
+             if(tHitR < *tHit){
+                 *tHit = tHitR;
+                 *isect = isectR;
+             }
+         }
+         return true;
+     }
+     else if (hitRight){
+         // std::printf("hitRight3!!! %f %f %f \n", tHitR, isectR.uv.x, isectR.uv.y);
+         *tHit = tHitR;
+         *isect = isectR;
+         return true;
+     }
     
     return false;
     
