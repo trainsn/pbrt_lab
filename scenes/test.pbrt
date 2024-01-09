@@ -1,0 +1,36 @@
+LookAt  1 2 4   # eye
+        0 0 0    # look at point
+        0 0 1    # up vector
+Camera "perspective" "float fov" 50
+
+Sampler "halton" "integer pixelsamples" [16] 
+
+Integrator "whitted" "integer maxdepth" [1]
+
+
+Film "image" "string filename" "test_micky.png"
+     "integer xresolution" [300] "integer yresolution" [300]
+
+
+WorldBegin
+
+AttributeBegin
+
+LightSource "spot" "color I" [50 50 50] "point from" [0 2 4.1] "point to" [0 0 0] "float coneangle" [60]
+
+# AreaLightSource "area" "color L" [0.8 0.8 0.8]
+# Shape "disk" "float radius" [0.5]
+
+AttributeEnd
+
+
+
+AttributeBegin
+Material "matte" "spectrum Kd" [0.8 0.8 0.8]
+Shape "micky" "float hradius" [1.] "float rradius" [0.5] "float lradius" [0.5] "float pleft" [-1.5, 0, 0.8]  "float pright" [1.5, 0, 0.8]
+#Shape "sphere" "float radius" [1.5]
+AttributeEnd
+
+
+
+WorldEnd
