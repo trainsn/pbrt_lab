@@ -1,0 +1,49 @@
+LookAt  5 0 1    # eye
+        0 0 0    # look at point
+        0 0 1    # up vector
+
+Camera "perspective" "float fov" 60
+
+Sampler "halton" "integer pixelsamples" [4] 
+
+Integrator "path" "integer maxdepth" [1]
+
+
+Film "image" "string filename" "snowman.exr"
+     "integer xresolution" [300] "integer yresolution" [300]
+
+
+
+WorldBegin
+
+AttributeBegin
+LightSource "spot" "color I" [50 50 50] "point from" [3 1 2] "point to" [0 0 0] "float coneangle" [60]
+# AreaLightSource "area" "color L" [0.8 0.8 0.8]
+# Shape "disk" "float radius" [0.5]
+AttributeEnd
+
+
+AttributeBegin
+  Texture "checks" "spectrum" "checkerboard"
+          "float uscale" [8] "float vscale" [8]
+          "rgb tex1" [.1 .1 .1] "rgb tex2" [.8 .8 .8]
+  Material "matte" "texture Kd" "checks"
+  Translate 0 0 -1
+  Shape "trianglemesh"
+      "integer indices" [0 1 2 0 2 3]
+      "point P" [ -20 -20 0   20 -20 0   20 20 0   -20 20 0 ]
+      "float st" [ 0 0   1 0    1 1   0 1 ]
+AttributeEnd
+
+
+
+AttributeBegin
+Material "matte" "spectrum Kd" [0.8 0.8 0.8]
+# Translate 0 2 0
+# Scale 1 2 1
+Shape "snowman"
+AttributeEnd
+
+
+WorldEnd
+
