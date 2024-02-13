@@ -1,31 +1,38 @@
-#include "shapes/sphere.h"
 #include "shapes/snowman.h"
-#include "sampling.h"
-#include "paramset.h"
 #include "efloat.h"
+#include "paramset.h"
+#include "sampling.h"
+#include "shapes/sphere.h"
 #include "stats.h"
 // #include <iostream> // for print
 
 namespace pbrt {
 
+STAT_COUNTER("Intersections/Rays hitting snowman head", nRaysHittingHead);
+STAT_COUNTER("Intersections/Rays hitting snowman body", nRaysHittingBody);
+
 // SnowMan Method Definitions
 SnowMan::SnowMan(const Transform *ObjectToWorld, const Transform *WorldToObject,
-           bool reverseOrientation,
-           Float radiusH, Float radiusB, 
-           Point3f &posH, Point3f &posB, 
-           Float phiMax): Shape(ObjectToWorld, WorldToObject, reverseOrientation),
-            radiusH(radiusH),
-            radiusB(radiusB),
-            posH(posH),
-            posB(posB),
-            phiMax(Radians(Clamp(phiMax, 0, 360))),
-            object2worldHead((*ObjectToWorld) * Translate(Vector3f(posH.x, posH.y, posH.z))),
-            world2objectHead((*WorldToObject) * Inverse(Translate(Vector3f(posH.x, posH.y, posH.z)))),
-            object2worldBody((*ObjectToWorld) * Translate(Vector3f(posB.x, posB.y, posB.z))),
-            world2objectBody((*WorldToObject) * Inverse(Translate(Vector3f(posB.x, posB.y, posB.z)))),
-            sphereHead(&object2worldHead, &world2objectHead, false, radiusH, -radiusH, radiusH, phiMax),  // 360.f
-            sphereBody(&object2worldBody, &world2objectBody, false, radiusB, -radiusB, radiusB, phiMax){}
-            
+                 bool reverseOrientation, Float radiusH, Float radiusB,
+                 Point3f &posH, Point3f &posB, Float phiMax)
+    : Shape(ObjectToWorld, WorldToObject, reverseOrientation),
+      radiusH(radiusH),
+      radiusB(radiusB),
+      posH(posH),
+      posB(posB),
+      phiMax(Radians(Clamp(phiMax, 0, 360))),
+      object2worldHead((*ObjectToWorld) *
+                       Translate(Vector3f(posH.x, posH.y, posH.z))),
+      world2objectHead((*WorldToObject) *
+                       Inverse(Translate(Vector3f(posH.x, posH.y, posH.z)))),
+      object2worldBody((*ObjectToWorld) *
+                       Translate(Vector3f(posB.x, posB.y, posB.z))),
+      world2objectBody((*WorldToObject) *
+                       Inverse(Translate(Vector3f(posB.x, posB.y, posB.z)))),
+      sphereHead(&object2worldHead, &world2objectHead, false, radiusH, -radiusH,
+                 radiusH, phiMax),  // 360.f
+      sphereBody(&object2worldBody, &world2objectBody, false, radiusB, -radiusB,
+                 radiusB, phiMax) {}
 
 Bounds3f SnowMan::ObjectBound() const {
     // wrong: return Union(sphereHead.ObjectBound(), sphereBody.ObjectBound());
@@ -40,30 +47,32 @@ Bounds3f SnowMan::ObjectBound() const {
     return Bounds3f(pmin, pmax);
 }
 
-
 bool SnowMan::Intersect(const Ray &r, Float *tHit, SurfaceInteraction *isect,
-                       bool testAlphaTexture) const {
+                        bool testAlphaTexture) const {
     ProfilePhase p(Prof::ShapeIntersect);
-    
+
     // get intersections information from two spheres
     SurfaceInteraction isect1, isect2;
     Float tHit1, tHit2;
     bool hit1 = sphereHead.Intersect(r, &tHit1, &isect1, testAlphaTexture);
     bool hit2 = sphereBody.Intersect(r, &tHit2, &isect2, testAlphaTexture);
-    
+
     // union
     if (hit1) {
+        ++nRaysHittingHead;  // Increment counter for the head
         *isect = isect1;
         *tHit = tHit1;
-        if (hit2){
-            if (tHit2 < tHit1){
+        if (hit2) {
+            if (tHit2 < tHit1) {
+                ++nRaysHittingBody;  // Increment counter for the body 
+				--nRaysHittingHead;
                 *isect = isect2;
                 *tHit = tHit2;
             }
-        }
+        } 
         return true;
-    }
-    else if (hit2) {
+    } else if (hit2) {
+        ++nRaysHittingBody;
         *isect = isect2;
         *tHit = tHit2;
         return true;
@@ -71,41 +80,34 @@ bool SnowMan::Intersect(const Ray &r, Float *tHit, SurfaceInteraction *isect,
     return false;
 }
 
-
 bool SnowMan::IntersectP(const Ray &r, bool testAlphaTexture) const {
     ProfilePhase p(Prof::ShapeIntersectP);
-    
-    if ( sphereHead.IntersectP(r, testAlphaTexture) ||
-         sphereBody.IntersectP(r, testAlphaTexture)
-        ) 
+
+    if (sphereHead.IntersectP(r, testAlphaTexture) ||
+        sphereBody.IntersectP(r, testAlphaTexture))
         return true;
 
     return false;
 }
 
-
-Float SnowMan::Area() const {
-    return sphereHead.Area() + sphereBody.Area();
-}
+Float SnowMan::Area() const { return sphereHead.Area() + sphereBody.Area(); }
 
 Interaction SnowMan::Sample(const Point2f &u, Float *pdf) const {
     LOG(FATAL) << "SnowMan::Sample not implemented.";
     return Interaction();
 }
 
-
 std::shared_ptr<Shape> CreateSnowManShape(const Transform *o2w,
-                                         const Transform *w2o,
-                                         bool reverseOrientation,
-                                         const ParamSet &params) {
+                                          const Transform *w2o,
+                                          bool reverseOrientation,
+                                          const ParamSet &params) {
     Float radiusH = params.FindOneFloat("radiusH", 1.f);
     Float radiusB = params.FindOneFloat("radiusB", .5f);
     Point3f posH = params.FindOnePoint3f("posH", Point3f(0, 0, 0));
     Point3f posB = params.FindOnePoint3f("posB", Point3f(0, 0, 1.1));
     Float phimax = params.FindOneFloat("phimax", 360.f);
-    return std::make_shared<SnowMan>(o2w, w2o, reverseOrientation, 
-                                    radiusH, radiusB,
-                                    posH, posB, phimax);
+    return std::make_shared<SnowMan>(o2w, w2o, reverseOrientation, radiusH,
+                                     radiusB, posH, posB, phimax);
 }
 
 }  // namespace pbrt

@@ -45,6 +45,9 @@ STAT_MEMORY_COUNTER("Memory/BVH tree", treeBytes);
 STAT_RATIO("BVH/Primitives per leaf node", totalPrimitives, totalLeafNodes);
 STAT_COUNTER("BVH/Interior nodes", interiorNodes);
 STAT_COUNTER("BVH/Leaf nodes", leafNodes);
+STAT_COUNTER("Intersections/Ray-bounding box intersections",
+             nRayBBoxIntersections);
+STAT_COUNTER("Intersections/Ray-object intersections", nRayObjectIntersections);
 
 // BVHAccel Local Declarations
 struct BVHPrimitiveInfo {
@@ -672,12 +675,16 @@ bool BVHAccel::Intersect(const Ray &ray, SurfaceInteraction *isect) const {
         const LinearBVHNode *node = &nodes[currentNodeIndex];
         // Check ray against BVH node
         if (node->bounds.IntersectP(ray, invDir, dirIsNeg)) {
+			++nRayBBoxIntersections;
             if (node->nPrimitives > 0) {
                 // Intersect ray with primitives in leaf BVH node
                 for (int i = 0; i < node->nPrimitives; ++i)
                     if (primitives[node->primitivesOffset + i]->Intersect(
-                            ray, isect))
+                            ray, isect)) {
+                        ++nRayObjectIntersections;
                         hit = true;
+                    }
+                        
                 if (toVisitOffset == 0) break;
                 currentNodeIndex = nodesToVisit[--toVisitOffset];
             } else {

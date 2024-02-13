@@ -32,12 +32,12 @@
 
 // core/api.cpp*
 #include "api.h"
-#include "parallel.h"
-#include "paramset.h"
-#include "spectrum.h"
-#include "scene.h"
 #include "film.h"
 #include "medium.h"
+#include "parallel.h"
+#include "paramset.h"
+#include "scene.h"
+#include "spectrum.h"
 #include "stats.h"
 
 // API Additional Headers
@@ -52,10 +52,10 @@
 #include "filters/mitchell.h"
 #include "filters/sinc.h"
 #include "filters/triangle.h"
+#include "integrators/ao.h"
 #include "integrators/bdpt.h"
 #include "integrators/directlighting.h"
 #include "integrators/mlt.h"
-#include "integrators/ao.h"
 #include "integrators/path.h"
 #include "integrators/sppm.h"
 #include "integrators/volpath.h"
@@ -81,6 +81,8 @@
 #include "materials/subsurface.h"
 #include "materials/translucent.h"
 #include "materials/uber.h"
+#include "media/grid.h"
+#include "media/homogeneous.h"
 #include "samplers/halton.h"
 #include "samplers/maxmin.h"
 #include "samplers/random.h"
@@ -94,12 +96,13 @@
 #include "shapes/heightfield.h"
 #include "shapes/hyperboloid.h"
 #include "shapes/loopsubdiv.h"
+#include "shapes/micky.h"
+#include "shapes/snowman.h"
 #include "shapes/nurbs.h"
 #include "shapes/paraboloid.h"
+#include "shapes/plymesh.h"
 #include "shapes/sphere.h"
 #include "shapes/triangle.h"
-#include "shapes/plymesh.h"
-#include "shapes/micky.h"
 #include "textures/bilerp.h"
 #include "textures/checkerboard.h"
 #include "textures/constant.h"
@@ -113,11 +116,9 @@
 #include "textures/uv.h"
 #include "textures/windy.h"
 #include "textures/wrinkled.h"
-#include "media/grid.h"
-#include "media/homogeneous.h"
 
-#include <map>
 #include <stdio.h>
+#include <map>
 
 namespace pbrt {
 
@@ -126,9 +127,9 @@ Options PbrtOptions;
 
 // API Local Classes
 PBRT_CONSTEXPR int MaxTransforms = 2;
-PBRT_CONSTEXPR int StartTransformBits = 1 << 0;  // 01
-PBRT_CONSTEXPR int EndTransformBits = 1 << 1;  // 10
-PBRT_CONSTEXPR int AllTransformsBits = (1 << MaxTransforms) - 1; // 11
+PBRT_CONSTEXPR int StartTransformBits = 1 << 0;                   // 01
+PBRT_CONSTEXPR int EndTransformBits = 1 << 1;                     // 10
+PBRT_CONSTEXPR int AllTransformsBits = (1 << MaxTransforms) - 1;  // 11
 struct TransformSet {
     // TransformSet Public Methods
     Transform &operator[](int i) {
@@ -190,8 +191,8 @@ struct RenderOptions {
 // different parameters from the shape).
 struct MaterialInstance {
     MaterialInstance() = default;
-    MaterialInstance(const std::string &name, const std::shared_ptr<Material> &mtl,
-                     ParamSet params)
+    MaterialInstance(const std::string &name,
+                     const std::shared_ptr<Material> &mtl, ParamSet params)
         : name(name), material(mtl), params(std::move(params)) {}
 
     std::string name;
@@ -208,7 +209,8 @@ struct GraphicsState {
         ParamSet empty;
         TextureParams tp(empty, empty, *floatTextures, *spectrumTextures);
         std::shared_ptr<Material> mtl(CreateMatteMaterial(tp));
-        currentMaterial = std::make_shared<MaterialInstance>("matte", mtl, ParamSet());
+        currentMaterial =
+            std::make_shared<MaterialInstance>("matte", mtl, ParamSet());
     }
     std::shared_ptr<Material> GetMaterialForShape(const ParamSet &geomParams);
     MediumInterface CreateMediumInterface();
@@ -222,15 +224,18 @@ struct GraphicsState {
     // in pbrtAttributeBegin(), we don't immediately make a copy of these
     // maps, but instead record that each one is shared.  Only if an item
     // is added to one is a unique copy actually made.
-    using FloatTextureMap = std::map<std::string, std::shared_ptr<Texture<Float>>>;
+    using FloatTextureMap =
+        std::map<std::string, std::shared_ptr<Texture<Float>>>;
     std::shared_ptr<FloatTextureMap> floatTextures;
     bool floatTexturesShared = false;
 
-    using SpectrumTextureMap = std::map<std::string, std::shared_ptr<Texture<Spectrum>>>;
+    using SpectrumTextureMap =
+        std::map<std::string, std::shared_ptr<Texture<Spectrum>>>;
     std::shared_ptr<SpectrumTextureMap> spectrumTextures;
     bool spectrumTexturesShared = false;
 
-    using NamedMaterialMap = std::map<std::string, std::shared_ptr<MaterialInstance>>;
+    using NamedMaterialMap =
+        std::map<std::string, std::shared_ptr<MaterialInstance>>;
     std::shared_ptr<NamedMaterialMap> namedMaterials;
     bool namedMaterialsShared = false;
 
@@ -241,8 +246,10 @@ struct GraphicsState {
 };
 
 STAT_MEMORY_COUNTER("Memory/TransformCache", transformCacheBytes);
-STAT_PERCENT("Scene/TransformCache hits", nTransformCacheHits, nTransformCacheLookups);
-STAT_INT_DISTRIBUTION("Scene/Probes per TransformCache lookup", transformCacheProbes);
+STAT_PERCENT("Scene/TransformCache hits", nTransformCacheHits,
+             nTransformCacheLookups);
+STAT_INT_DISTRIBUTION("Scene/Probes per TransformCache lookup",
+                      transformCacheProbes);
 
 // Note: TransformCache has been reimplemented and has a slightly different
 // interface compared to the version described in the third edition of
@@ -259,8 +266,7 @@ STAT_INT_DISTRIBUTION("Scene/Probes per TransformCache lookup", transformCachePr
 // is used when there is a hash collision.
 class TransformCache {
   public:
-    TransformCache()
-        : hashTable(512), hashTableOccupancy(0) {}
+    TransformCache() : hashTable(512), hashTableOccupancy(0) {}
 
     // TransformCache Public Methods
     Transform *Lookup(const Transform &t) {
@@ -271,8 +277,7 @@ class TransformCache {
         while (true) {
             // Keep looking until we find the Transform or determine that
             // it's not present.
-            if (!hashTable[offset] || *hashTable[offset] == t)
-                break;
+            if (!hashTable[offset] || *hashTable[offset] == t) break;
             // Advance using quadratic probing.
             offset = (offset + step * step) & (hashTable.size() - 1);
             ++step;
@@ -290,7 +295,8 @@ class TransformCache {
     }
 
     void Clear() {
-        transformCacheBytes += arena.TotalAllocated() + hashTable.size() * sizeof(Transform *);
+        transformCacheBytes +=
+            arena.TotalAllocated() + hashTable.size() * sizeof(Transform *);
         hashTable.clear();
         hashTable.resize(512);
         hashTableOccupancy = 0;
@@ -321,13 +327,13 @@ class TransformCache {
 };
 
 void TransformCache::Insert(Transform *tNew) {
-    if (++hashTableOccupancy == hashTable.size() / 2)
-        Grow();
+    if (++hashTableOccupancy == hashTable.size() / 2) Grow();
 
     int baseOffset = Hash(*tNew) & (hashTable.size() - 1);
     for (int nProbes = 0;; ++nProbes) {
         // Quadratic probing.
-        int offset = (baseOffset + nProbes/2 + nProbes*nProbes/2) & (hashTable.size() - 1);
+        int offset = (baseOffset + nProbes / 2 + nProbes * nProbes / 2) &
+                     (hashTable.size() - 1);
         if (hashTable[offset] == nullptr) {
             hashTable[offset] = tNew;
             return;
@@ -346,7 +352,8 @@ void TransformCache::Grow() {
         int baseOffset = Hash(*tEntry) & (hashTable.size() - 1);
         for (int nProbes = 0;; ++nProbes) {
             // Quadratic probing.
-            int offset = (baseOffset + nProbes/2 + nProbes*nProbes/2) & (hashTable.size() - 1);
+            int offset = (baseOffset + nProbes / 2 + nProbes * nProbes / 2) &
+                         (hashTable.size() - 1);
             if (newTable[offset] == nullptr) {
                 newTable[offset] = tEntry;
                 break;
@@ -356,7 +363,6 @@ void TransformCache::Grow() {
 
     std::swap(hashTable, newTable);
 }
-
 
 // API Static Data
 enum class APIState { Uninitialized, OptionsBlock, WorldBlock };
@@ -381,8 +387,8 @@ std::vector<std::shared_ptr<Shape>> MakeShapes(const std::string &name,
 
 // API Macros
 #define VERIFY_INITIALIZED(func)                           \
-    if (!(PbrtOptions.cat || PbrtOptions.toPly) &&           \
-        currentApiState == APIState::Uninitialized) {        \
+    if (!(PbrtOptions.cat || PbrtOptions.toPly) &&         \
+        currentApiState == APIState::Uninitialized) {      \
         Error(                                             \
             "pbrtInit() must be before calling \"%s()\". " \
             "Ignoring.",                                   \
@@ -453,8 +459,11 @@ std::vector<std::shared_ptr<Shape>> MakeShapes(const std::string &name,
     // add by jingyi
     else if (name == "micky")
         s = CreateMickyShape(object2world, world2object, reverseOrientation,
-                              paramSet);
-    if (s != nullptr) shapes.push_back(s);
+                             paramSet);
+    else if (name == "snowman")
+        s = CreateSnowManShape(object2world, world2object, reverseOrientation,
+                               paramSet);
+	if (s != nullptr) shapes.push_back(s);
 
     // Create multiple-_Shape_ types
     else if (name == "curve")
@@ -474,7 +483,8 @@ std::vector<std::shared_ptr<Shape>> MakeShapes(const std::string &name,
                 static int count = 1;
                 const char *plyPrefix =
                     getenv("PLY_PREFIX") ? getenv("PLY_PREFIX") : "mesh";
-                std::string fn = StringPrintf("%s_%05d.ply", plyPrefix, count++);
+                std::string fn =
+                    StringPrintf("%s_%05d.ply", plyPrefix, count++);
 
                 int npi, nuvi, nsi, nni;
                 const Point3f *P = paramSet.FindPoint3f("P", &npi);
@@ -488,7 +498,8 @@ std::vector<std::shared_ptr<Shape>> MakeShapes(const std::string &name,
                         nuvi /= 2;
                         tempUVs.reserve(nuvi);
                         for (int i = 0; i < nuvi; ++i)
-                            tempUVs.push_back(Point2f(fuv[2 * i], fuv[2 * i + 1]));
+                            tempUVs.push_back(
+                                Point2f(fuv[2 * i], fuv[2 * i + 1]));
                         uvs = &tempUVs[0];
                     }
                 }
@@ -606,8 +617,10 @@ std::shared_ptr<Material> MakeMaterial(const std::string &name,
             name.c_str(), renderOptions->IntegratorName.c_str());
 
     mp.ReportUnused();
-    if (!material) Error("Unable to create material \"%s\"", name.c_str());
-    else ++nMaterialsCreated;
+    if (!material)
+        Error("Unable to create material \"%s\"", name.c_str());
+    else
+        ++nMaterialsCreated;
     return std::shared_ptr<Material>(material);
 }
 
@@ -737,7 +750,8 @@ std::shared_ptr<Light> MakeLight(const std::string &name,
                                  const MediumInterface &mediumInterface) {
     std::shared_ptr<Light> light;
     if (name == "point")
-        light = CreatePointLight(light2world, mediumInterface.outside, paramSet);
+        light =
+            CreatePointLight(light2world, mediumInterface.outside, paramSet);
     else if (name == "spot")
         light = CreateSpotLight(light2world, mediumInterface.outside, paramSet);
     else if (name == "goniometric")
@@ -772,8 +786,7 @@ std::shared_ptr<AreaLight> MakeAreaLight(const std::string &name,
 }
 
 std::shared_ptr<Primitive> MakeAccelerator(
-    const std::string &name,
-    std::vector<std::shared_ptr<Primitive>> prims,
+    const std::string &name, std::vector<std::shared_ptr<Primitive>> prims,
     const ParamSet &paramSet) {
     std::shared_ptr<Primitive> accel;
     if (name == "bvh")
@@ -793,10 +806,8 @@ Camera *MakeCamera(const std::string &name, const ParamSet &paramSet,
     MediumInterface mediumInterface = graphicsState.CreateMediumInterface();
     static_assert(MaxTransforms == 2,
                   "TransformCache assumes only two transforms");
-    Transform *cam2world[2] = {
-        transformCache.Lookup(cam2worldSet[0]),
-        transformCache.Lookup(cam2worldSet[1])
-    };
+    Transform *cam2world[2] = {transformCache.Lookup(cam2worldSet[0]),
+                               transformCache.Lookup(cam2worldSet[1])};
     AnimatedTransform animatedCam2World(cam2world[0], transformStart,
                                         cam2world[1], transformEnd);
     if (name == "perspective")
@@ -912,8 +923,7 @@ void pbrtTranslate(Float dx, Float dy, Float dz) {
     FOR_ACTIVE_TRANSFORMS(curTransform[i] = curTransform[i] *
                                             Translate(Vector3f(dx, dy, dz));)
     if (PbrtOptions.cat || PbrtOptions.toPly)
-        printf("%*sTranslate %.9g %.9g %.9g\n", catIndentCount, "", dx, dy,
-               dz);
+        printf("%*sTranslate %.9g %.9g %.9g\n", catIndentCount, "", dx, dy, dz);
 }
 
 void pbrtTransform(Float tr[16]) {
@@ -930,8 +940,9 @@ void pbrtTransform(Float tr[16]) {
 }
 
 void pbrtConcatTransform(Float tr[16]) {
-    VERIFY_INITIALIZED("ConcatTransform"); // transform can in either option block or world block
-    FOR_ACTIVE_TRANSFORMS(  // start or end or both
+    VERIFY_INITIALIZED("ConcatTransform");  // transform can in either option
+                                            // block or world block
+    FOR_ACTIVE_TRANSFORMS(                  // start or end or both
         curTransform[i] =
             curTransform[i] *  // post multiply
             Transform(Matrix4x4(tr[0], tr[4], tr[8], tr[12], tr[1], tr[5],
@@ -950,8 +961,8 @@ void pbrtRotate(Float angle, Float dx, Float dy, Float dz) {
                               curTransform[i] *
                               Rotate(angle, Vector3f(dx, dy, dz));)
     if (PbrtOptions.cat || PbrtOptions.toPly)
-        printf("%*sRotate %.9g %.9g %.9g %.9g\n", catIndentCount, "", angle,
-               dx, dy, dz);
+        printf("%*sRotate %.9g %.9g %.9g %.9g\n", catIndentCount, "", angle, dx,
+               dy, dz);
 }
 
 void pbrtScale(Float sx, Float sy, Float sz) {
@@ -967,7 +978,8 @@ void pbrtLookAt(Float ex, Float ey, Float ez, Float lx, Float ly, Float lz,
     VERIFY_INITIALIZED("LookAt");
     Transform lookAt =
         LookAt(Point3f(ex, ey, ez), Point3f(lx, ly, lz), Vector3f(ux, uy, uz));
-    FOR_ACTIVE_TRANSFORMS(curTransform[i] = curTransform[i] * lookAt;);  // world to camera
+    FOR_ACTIVE_TRANSFORMS(curTransform[i] =
+                              curTransform[i] * lookAt;);  // world to camera
     if (PbrtOptions.cat || PbrtOptions.toPly)
         printf(
             "%*sLookAt %.9g %.9g %.9g\n%*s%.9g %.9g %.9g\n"
@@ -1018,8 +1030,7 @@ void pbrtTransformTimes(Float start, Float end) {
     renderOptions->transformStartTime = start;
     renderOptions->transformEndTime = end;
     if (PbrtOptions.cat || PbrtOptions.toPly)
-        printf("%*sTransformTimes %.9g %.9g\n", catIndentCount, "", start,
-               end);
+        printf("%*sTransformTimes %.9g %.9g\n", catIndentCount, "", start, end);
 }
 
 void pbrtPixelFilter(const std::string &name, const ParamSet &params) {
@@ -1081,7 +1092,8 @@ void pbrtCamera(const std::string &name, const ParamSet &params) {
     VERIFY_OPTIONS("Camera");
     renderOptions->CameraName = name;
     renderOptions->CameraParams = params;
-    renderOptions->CameraToWorld = Inverse(curTransform);  // curTransform is world to camera
+    renderOptions->CameraToWorld =
+        Inverse(curTransform);  // curTransform is world to camera
     namedCoordinateSystems["camera"] = renderOptions->CameraToWorld;
     if (PbrtOptions.cat || PbrtOptions.toPly) {
         printf("%*sCamera \"%s\" ", catIndentCount, "", name.c_str());
@@ -1121,21 +1133,27 @@ void pbrtMediumInterface(const std::string &insideName,
 
 void pbrtWorldBegin() {
     VERIFY_OPTIONS("WorldBegin");
-    currentApiState = APIState::WorldBlock;  // change current state to world block
-    for (int i = 0; i < MaxTransforms; ++i) curTransform[i] = Transform(); // ctm is used in option- and world-block, reset to identity at world begin; clean transform in option block
+    currentApiState =
+        APIState::WorldBlock;  // change current state to world block
+    for (int i = 0; i < MaxTransforms; ++i)
+        curTransform[i] =
+            Transform();  // ctm is used in option- and world-block, reset to
+                          // identity at world begin; clean transform in option
+                          // block
     activeTransformBits = AllTransformsBits;
     namedCoordinateSystems["world"] = curTransform;
-    if (PbrtOptions.cat || PbrtOptions.toPly)
-        printf("\n\nWorldBegin\n\n");
+    if (PbrtOptions.cat || PbrtOptions.toPly) printf("\n\nWorldBegin\n\n");
 }
 
 void pbrtAttributeBegin() {
-    VERIFY_WORLD("AttributeBegin"); // verify if in worldblock state
+    VERIFY_WORLD("AttributeBegin");  // verify if in worldblock state
     pushedGraphicsStates.push_back(graphicsState);  // add in stack
     graphicsState.floatTexturesShared = graphicsState.spectrumTexturesShared =
-        graphicsState.namedMaterialsShared = true; 
-    pushedTransforms.push_back(curTransform); // curTransform, MaxTransforms = 2, start and end frame
-    pushedActiveTransformBits.push_back(activeTransformBits);  // current is start or end or both
+        graphicsState.namedMaterialsShared = true;
+    pushedTransforms.push_back(
+        curTransform);  // curTransform, MaxTransforms = 2, start and end frame
+    pushedActiveTransformBits.push_back(
+        activeTransformBits);  // current is start or end or both
     if (PbrtOptions.cat || PbrtOptions.toPly) {  // print to stdout
         printf("\n%*sAttributeBegin\n", catIndentCount, "");
         catIndentCount += 4;
@@ -1216,7 +1234,8 @@ void pbrtTexture(const std::string &name, const std::string &type,
             // provide direct floatTextures access?
             if (graphicsState.floatTexturesShared) {
                 graphicsState.floatTextures =
-                    std::make_shared<GraphicsState::FloatTextureMap>(*graphicsState.floatTextures);
+                    std::make_shared<GraphicsState::FloatTextureMap>(
+                        *graphicsState.floatTextures);
                 graphicsState.floatTexturesShared = false;
             }
             (*graphicsState.floatTextures)[name] = ft;
@@ -1232,7 +1251,8 @@ void pbrtTexture(const std::string &name, const std::string &type,
         if (st) {
             if (graphicsState.spectrumTexturesShared) {
                 graphicsState.spectrumTextures =
-                    std::make_shared<GraphicsState::SpectrumTextureMap>(*graphicsState.spectrumTextures);
+                    std::make_shared<GraphicsState::SpectrumTextureMap>(
+                        *graphicsState.spectrumTextures);
                 graphicsState.spectrumTexturesShared = false;
             }
             (*graphicsState.spectrumTextures)[name] = st;
@@ -1261,8 +1281,13 @@ void pbrtMakeNamedMaterial(const std::string &name, const ParamSet &params) {
     VERIFY_WORLD("MakeNamedMaterial");
     // error checking, warning if replace, what to use for transform?
     ParamSet emptyParams;
-    TextureParams mp(params, emptyParams, *graphicsState.floatTextures, // ParamSet &geomParams, ParamSet &materialParams,
-                     *graphicsState.spectrumTextures); // if both shape(geo) and material has defined kd, should consider using shape kd first
+    TextureParams mp(
+        params, emptyParams,
+        *graphicsState
+             .floatTextures,  // ParamSet &geomParams, ParamSet &materialParams,
+        *graphicsState
+             .spectrumTextures);  // if both shape(geo) and material has defined
+                                  // kd, should consider using shape kd first
     std::string matName = mp.FindString("type");
     WARN_IF_ANIMATED_TRANSFORM("MakeNamedMaterial");
     if (matName == "")
@@ -1278,10 +1303,18 @@ void pbrtMakeNamedMaterial(const std::string &name, const ParamSet &params) {
         if (graphicsState.namedMaterials->find(name) !=
             graphicsState.namedMaterials->end())
             Warning("Named material \"%s\" redefined.", name.c_str());
-        if (graphicsState.namedMaterialsShared) { // if true, copy-on-write
+        if (graphicsState.namedMaterialsShared) {  // if true, copy-on-write
             graphicsState.namedMaterials =
-                std::make_shared<GraphicsState::NamedMaterialMap>(*graphicsState.namedMaterials); // the map is only duplicated when a modification is about to be made, The copy is modified, ensuring that the original data remains unchanged for other instances.
-            graphicsState.namedMaterialsShared = false; // the map is no longer shared and can be modified independently
+                std::make_shared<GraphicsState::NamedMaterialMap>(
+                    *graphicsState
+                         .namedMaterials);  // the map is only duplicated when a
+                                            // modification is about to be made,
+                                            // The copy is modified, ensuring
+                                            // that the original data remains
+                                            // unchanged for other instances.
+            graphicsState.namedMaterialsShared =
+                false;  // the map is no longer shared and can be modified
+                        // independently
         }
         (*graphicsState.namedMaterials)[name] =
             std::make_shared<MaterialInstance>(matName, mtl, params);
@@ -1306,7 +1339,7 @@ void pbrtNamedMaterial(const std::string &name) {
 void pbrtLightSource(const std::string &name, const ParamSet &params) {
     VERIFY_WORLD("LightSource");
     WARN_IF_ANIMATED_TRANSFORM("LightSource");
-    MediumInterface mi = graphicsState.CreateMediumInterface(); 
+    MediumInterface mi = graphicsState.CreateMediumInterface();
     std::shared_ptr<Light> lt = MakeLight(name, params, curTransform[0], mi);
     if (!lt)
         Error("LightSource: light type \"%s\" unknown.", name.c_str());
@@ -1321,7 +1354,10 @@ void pbrtLightSource(const std::string &name, const ParamSet &params) {
 
 void pbrtAreaLightSource(const std::string &name, const ParamSet &params) {
     VERIFY_WORLD("AreaLightSource");
-    graphicsState.areaLight = name;  // put name and params into graphicsState. why in graphicsState:  AreaLightSource within AttributeBegin and End, Shape after AreaLightSource is the shape of the emitter
+    graphicsState.areaLight =
+        name;  // put name and params into graphicsState. why in graphicsState:
+               // AreaLightSource within AttributeBegin and End, Shape after
+               // AreaLightSource is the shape of the emitter
     graphicsState.areaLightParams = params;
     if (PbrtOptions.cat || PbrtOptions.toPly) {
         printf("%*sAreaLightSource \"%s\" ", catIndentCount, "", name.c_str());
@@ -1340,7 +1376,8 @@ void pbrtShape(const std::string &name, const ParamSet &params) {
         printf("\n");
     }
 
-    if (!curTransform.IsAnimated()) { // ctm.IsAnimated: TransformedPrimitive or GeometricPrimitive
+    if (!curTransform.IsAnimated()) {  // ctm.IsAnimated: TransformedPrimitive
+                                       // or GeometricPrimitive
         // Initialize _prims_ and _areaLights_ for static shape
 
         // Create shapes for shape _name_
@@ -1350,7 +1387,8 @@ void pbrtShape(const std::string &name, const ParamSet &params) {
             MakeShapes(name, ObjToWorld, WorldToObj,
                        graphicsState.reverseOrientation, params);
         if (shapes.empty()) return;
-        std::shared_ptr<Material> mtl = graphicsState.GetMaterialForShape(params); 
+        std::shared_ptr<Material> mtl =
+            graphicsState.GetMaterialForShape(params);
         params.ReportUnused();
         MediumInterface mi = graphicsState.CreateMediumInterface();
         prims.reserve(shapes.size());
@@ -1379,7 +1417,8 @@ void pbrtShape(const std::string &name, const ParamSet &params) {
         if (shapes.empty()) return;
 
         // Create _GeometricPrimitive_(s) for animated shape
-        std::shared_ptr<Material> mtl = graphicsState.GetMaterialForShape(params);
+        std::shared_ptr<Material> mtl =
+            graphicsState.GetMaterialForShape(params);
         params.ReportUnused();
         MediumInterface mi = graphicsState.CreateMediumInterface();
         prims.reserve(shapes.size());
@@ -1392,10 +1431,8 @@ void pbrtShape(const std::string &name, const ParamSet &params) {
         // Get _animatedObjectToWorld_ transform for shape
         static_assert(MaxTransforms == 2,
                       "TransformCache assumes only two transforms");
-        Transform *ObjToWorld[2] = {
-            transformCache.Lookup(curTransform[0]),
-            transformCache.Lookup(curTransform[1])
-        };
+        Transform *ObjToWorld[2] = {transformCache.Lookup(curTransform[0]),
+                                    transformCache.Lookup(curTransform[1])};
         AnimatedTransform animatedObjectToWorld(
             ObjToWorld[0], renderOptions->transformStartTime, ObjToWorld[1],
             renderOptions->transformEndTime);
@@ -1405,15 +1442,17 @@ void pbrtShape(const std::string &name, const ParamSet &params) {
             prims.push_back(bvh);
         }
         prims[0] = std::make_shared<TransformedPrimitive>(
-            prims[0], animatedObjectToWorld); // all prims use the same ctm
+            prims[0], animatedObjectToWorld);  // all prims use the same ctm
     }
     // Add _prims_ and _areaLights_ to scene or current instance
-    if (renderOptions->currentInstance) { // add to current instance, Shape inside ObjectBegin and ObjectEnd block
+    if (renderOptions
+            ->currentInstance) {  // add to current instance, Shape inside
+                                  // ObjectBegin and ObjectEnd block
         if (areaLights.size())
             Warning("Area lights not supported with object instancing");
         renderOptions->currentInstance->insert(
             renderOptions->currentInstance->end(), prims.begin(), prims.end());
-    } else { // add into scene
+    } else {  // add into scene
         renderOptions->primitives.insert(renderOptions->primitives.end(),
                                          prims.begin(), prims.end());
         if (areaLights.size())
@@ -1432,13 +1471,11 @@ bool shapeMaySetMaterialParameters(const ParamSet &ps) {
     for (const auto &param : ps.textures)
         // Any texture other than one for an alpha mask is almost certainly
         // for a Material (or is unused!).
-        if (param->name != "alpha" && param->name != "shadowalpha")
-            return true;
+        if (param->name != "alpha" && param->name != "shadowalpha") return true;
 
     // Special case spheres, which are the most common non-mesh primitive.
     for (const auto &param : ps.floats)
-        if (param->nValues == 1 && param->name != "radius")
-            return true;
+        if (param->nValues == 1 && param->name != "radius") return true;
 
     // Extra special case strings, since plymesh uses "filename", curve "type",
     // and loopsubdiv "scheme".
@@ -1452,29 +1489,21 @@ bool shapeMaySetMaterialParameters(const ParamSet &ps) {
     // (if conservative), since no materials currently take array
     // parameters.
     for (const auto &param : ps.bools)
-        if (param->nValues == 1)
-            return true;
+        if (param->nValues == 1) return true;
     for (const auto &param : ps.ints)
-        if (param->nValues == 1)
-            return true;
+        if (param->nValues == 1) return true;
     for (const auto &param : ps.point2fs)
-        if (param->nValues == 1)
-            return true;
+        if (param->nValues == 1) return true;
     for (const auto &param : ps.vector2fs)
-        if (param->nValues == 1)
-            return true;
+        if (param->nValues == 1) return true;
     for (const auto &param : ps.point3fs)
-        if (param->nValues == 1)
-            return true;
+        if (param->nValues == 1) return true;
     for (const auto &param : ps.vector3fs)
-        if (param->nValues == 1)
-            return true;
+        if (param->nValues == 1) return true;
     for (const auto &param : ps.normals)
-        if (param->nValues == 1)
-            return true;
+        if (param->nValues == 1) return true;
     for (const auto &param : ps.spectra)
-        if (param->nValues == 1)
-            return true;
+        if (param->nValues == 1) return true;
 
     return false;
 }
@@ -1486,8 +1515,10 @@ std::shared_ptr<Material> GraphicsState::GetMaterialForShape(
         // Only create a unique material for the shape if the shape's
         // parameters are (apparently) going to provide values for some of
         // the material parameters.
-        TextureParams mp(shapeParams, currentMaterial->params, *floatTextures,
-                         *spectrumTextures);  // get material for shape, consider shapeParams first, if it is none, use material's params
+        TextureParams mp(
+            shapeParams, currentMaterial->params, *floatTextures,
+            *spectrumTextures);  // get material for shape, consider shapeParams
+                                 // first, if it is none, use material's params
         return MakeMaterial(currentMaterial->name, mp);
     } else
         return currentMaterial->material;
@@ -1526,7 +1557,8 @@ void pbrtObjectBegin(const std::string &name) {
     pbrtAttributeBegin();  // AttributeStack, push into stack
     if (renderOptions->currentInstance)
         Error("ObjectBegin called inside of instance definition");
-    renderOptions->instances[name] = std::vector<std::shared_ptr<Primitive>>(); // instances is a map, contains a vec of Primitive
+    renderOptions->instances[name] = std::vector<std::shared_ptr<
+        Primitive>>();  // instances is a map, contains a vec of Primitive
     renderOptions->currentInstance = &renderOptions->instances[name];
     if (PbrtOptions.cat || PbrtOptions.toPly)
         printf("%*sObjectBegin \"%s\"\n", catIndentCount, "", name.c_str());
@@ -1567,7 +1599,7 @@ void pbrtObjectInstance(const std::string &name) {
         renderOptions->instances[name];
     if (in.empty()) return;
     ++nObjectInstancesUsed;
-    if (in.size() > 1) { // Primitive > 1, use Accelerator
+    if (in.size() > 1) {  // Primitive > 1, use Accelerator
         // Create aggregate for instance _Primitive_s
         std::shared_ptr<Primitive> accel(
             MakeAccelerator(renderOptions->AcceleratorName, std::move(in),
@@ -1575,14 +1607,13 @@ void pbrtObjectInstance(const std::string &name) {
         if (!accel) accel = std::make_shared<BVHAccel>(in);
         in.clear();
         in.push_back(accel);
-    } // ensure 'vec in' contains a Primitive of size 1, only need one ctm, otherwise, every Primitive needs one (same) ctm
+    }  // ensure 'vec in' contains a Primitive of size 1, only need one ctm,
+       // otherwise, every Primitive needs one (same) ctm
     static_assert(MaxTransforms == 2,
                   "TransformCache assumes only two transforms");
     // Create _animatedInstanceToWorld_ transform for instance
-    Transform *InstanceToWorld[2] = {
-        transformCache.Lookup(curTransform[0]),
-        transformCache.Lookup(curTransform[1])
-    };
+    Transform *InstanceToWorld[2] = {transformCache.Lookup(curTransform[0]),
+                                     transformCache.Lookup(curTransform[1])};
     AnimatedTransform animatedInstanceToWorld(
         InstanceToWorld[0], renderOptions->transformStartTime,
         InstanceToWorld[1], renderOptions->transformEndTime);
@@ -1607,7 +1638,7 @@ void pbrtWorldEnd() {
     // Create scene and render
     if (PbrtOptions.cat || PbrtOptions.toPly) {
         printf("%*sWorldEnd\n", catIndentCount, "");
-    } else { // make Scene and Integrator 
+    } else {  // make Scene and Integrator
         std::unique_ptr<Integrator> integrator(renderOptions->MakeIntegrator());
         std::unique_ptr<Scene> scene(renderOptions->MakeScene());
 
@@ -1630,7 +1661,7 @@ void pbrtWorldEnd() {
     // destructors can run and update stats as needed.
     graphicsState = GraphicsState();
     transformCache.Clear();
-    currentApiState = APIState::OptionsBlock; // back to option block state
+    currentApiState = APIState::OptionsBlock;  // back to option block state
     ImageTexture<Float, Float>::ClearCache();
     ImageTexture<RGBSpectrum, Spectrum>::ClearCache();
     renderOptions.reset(new RenderOptions);
@@ -1653,8 +1684,8 @@ void pbrtWorldEnd() {
 }
 
 Scene *RenderOptions::MakeScene() {
-    std::shared_ptr<Primitive> accelerator =
-        MakeAccelerator(AcceleratorName, std::move(primitives), AcceleratorParams);
+    std::shared_ptr<Primitive> accelerator = MakeAccelerator(
+        AcceleratorName, std::move(primitives), AcceleratorParams);
     if (!accelerator) accelerator = std::make_shared<BVHAccel>(primitives);
     Scene *scene = new Scene(accelerator, lights);
     // Erase primitives and lights from _RenderOptions_
@@ -1705,7 +1736,8 @@ Integrator *RenderOptions::MakeIntegrator() const {
         Warning(
             "Scene has scattering media but \"%s\" integrator doesn't support "
             "volume scattering. Consider using \"volpath\", \"bdpt\", or "
-            "\"mlt\".", IntegratorName.c_str());
+            "\"mlt\".",
+            IntegratorName.c_str());
     }
 
     IntegratorParams.ReportUnused();
@@ -1725,8 +1757,8 @@ Camera *RenderOptions::MakeCamera() const {
         return nullptr;
     }
     Camera *camera = pbrt::MakeCamera(CameraName, CameraParams, CameraToWorld,
-                                  renderOptions->transformStartTime,
-                                  renderOptions->transformEndTime, film);
+                                      renderOptions->transformStartTime,
+                                      renderOptions->transformEndTime, film);
     return camera;
 }
 

@@ -235,6 +235,10 @@ void SamplerIntegrator::Render(const Scene &scene) {
     const int tileSize = 16;
     Point2i nTiles((sampleExtent.x + tileSize - 1) / tileSize,
                    (sampleExtent.y + tileSize - 1) / tileSize);
+
+	// Vector to hold intersection counters for each tile
+    std::vector<std::atomic<int>> intersectionsPerTile(nTiles.x * nTiles.y);
+
     ProgressReporter reporter(nTiles.x * nTiles.y, "Rendering");
     {
         ParallelFor2D([&](Point2i tile) {
@@ -246,6 +250,7 @@ void SamplerIntegrator::Render(const Scene &scene) {
             // Get sampler instance for tile
             int seed = tile.y * nTiles.x + tile.x;
             std::unique_ptr<Sampler> tileSampler = sampler->Clone(seed);
+            auto &tileIntersections = intersectionsPerTile[seed];
 
             // Compute sample bounds for tile
             int x0 = sampleBounds.pMin.x + tile.x * tileSize;
@@ -253,7 +258,7 @@ void SamplerIntegrator::Render(const Scene &scene) {
             int y0 = sampleBounds.pMin.y + tile.y * tileSize;
             int y1 = std::min(y0 + tileSize, sampleBounds.pMax.y);
             Bounds2i tileBounds(Point2i(x0, y0), Point2i(x1, y1));
-            LOG(INFO) << "Starting image tile " << tileBounds;
+            //std::cout << "Starting image tile " << tileBounds;
 
             // Get _FilmTile_ for tile
             std::unique_ptr<FilmTile> filmTile =
@@ -291,7 +296,14 @@ void SamplerIntegrator::Render(const Scene &scene) {
 
                     // Evaluate radiance along camera ray
                     Spectrum L(0.f);
-                    if (rayWeight > 0) L = Li(ray, scene, *tileSampler, arena);
+                    if (rayWeight > 0) {
+						L = Li(ray, scene, *tileSampler, arena);
+                        SurfaceInteraction isect;
+                        if (scene.Intersect(ray, &isect)) {
+                            // Increment tile-specific intersection counter
+                            tileIntersections++;
+                        }
+					}
 
                     // Issue warning if unexpected radiance value returned
                     if (L.HasNaNs()) {
@@ -316,7 +328,8 @@ void SamplerIntegrator::Render(const Scene &scene) {
                             (int)tileSampler->CurrentSampleNumber());
                         L = Spectrum(0.f);
                     }
-                    VLOG(1) << "Camera sample: " << cameraSample << " -> ray: " <<
+                    VLOG(1) << "Camera sample: " << cameraSample
+                              << " -> ray: " <<
                         ray << " -> L = " << L;
 
                     // Add camera ray's contribution to image
@@ -327,7 +340,7 @@ void SamplerIntegrator::Render(const Scene &scene) {
                     arena.Reset();
                 } while (tileSampler->StartNextSample());
             }
-            LOG(INFO) << "Finished image tile " << tileBounds;
+            //std::cout << "Finished image tile " << tileBounds;
             
             // Once radiance values for all of the samples in a tile have been computed,
             // Merge image tile into _Film_
@@ -337,6 +350,17 @@ void SamplerIntegrator::Render(const Scene &scene) {
         reporter.Done();
     }
     LOG(INFO) << "Rendering finished";
+
+	// After rendering, print the intersection counts for each tile using
+    // std::cout
+    for (int y = 0; y < nTiles.y; ++y) {
+        for (int x = 0; x < nTiles.x; ++x) {
+            int index = y * nTiles.x + x;
+            std::cout << "Tile [" << x << ", " << y << "] had "
+                      << intersectionsPerTile[index].load() << " intersections."
+                      << std::endl;
+        }
+    }
 
     // Save final image after rendering
     camera->film->WriteImage();

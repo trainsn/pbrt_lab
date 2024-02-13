@@ -9,7 +9,7 @@ Sampler "halton" "integer pixelsamples" [4]
 Integrator "path" "integer maxdepth" [1]
 
 
-Film "image" "string filename" "snowman.exr"
+Film "image" "string filename" "snowman.png"
      "integer xresolution" [300] "integer yresolution" [300]
 
 
