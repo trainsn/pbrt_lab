@@ -299,9 +299,9 @@ void SamplerIntegrator::Render(const Scene &scene) {
                     if (rayWeight > 0) {
 						L = Li(ray, scene, *tileSampler, arena);
                         SurfaceInteraction isect;
-                        if (scene.Intersect(ray, &isect)) {
-                            // Increment tile-specific intersection counter
-                            tileIntersections++;
+                        if (scene.aggregate->Intersect(ray, &isect)) {
+							// Increment tile-specific intersection counter
+							tileIntersections++;
                         }
 					}
 
