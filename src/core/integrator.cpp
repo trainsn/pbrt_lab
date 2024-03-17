@@ -298,10 +298,10 @@ void SamplerIntegrator::Render(const Scene &scene) {
                     Spectrum L(0.f);
                     if (rayWeight > 0) {
 						L = Li(ray, scene, *tileSampler, arena);
-                        if (scene.IntersectP(ray)) {
-							// Increment tile-specific intersection counter
-							tileIntersections++;
-                        }
+       //                 if (scene.IntersectP(ray)) {
+							//// Increment tile-specific intersection counter
+							//tileIntersections++;
+       //                 }
 					}
 
                     // Issue warning if unexpected radiance value returned
@@ -352,14 +352,14 @@ void SamplerIntegrator::Render(const Scene &scene) {
 
 	// After rendering, print the intersection counts for each tile using
     // std::cout
-    for (int y = 0; y < nTiles.y; ++y) {
-        for (int x = 0; x < nTiles.x; ++x) {
-            int index = y * nTiles.x + x;
-            std::cout << "Tile [" << x << ", " << y << "] had "
-                      << intersectionsPerTile[index].load() << " intersections."
-                      << std::endl;
-        }
-    }
+    //for (int y = 0; y < nTiles.y; ++y) {
+    //    for (int x = 0; x < nTiles.x; ++x) {
+    //        int index = y * nTiles.x + x;
+    //        std::cout << "Tile [" << x << ", " << y << "] had "
+    //                  << intersectionsPerTile[index].load() << " intersections."
+    //                  << std::endl;
+    //    }
+    //}
 
     // Save final image after rendering
     camera->film->WriteImage();

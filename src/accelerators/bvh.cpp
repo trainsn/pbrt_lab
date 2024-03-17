@@ -681,7 +681,6 @@ bool BVHAccel::Intersect(const Ray &ray, SurfaceInteraction *isect) const {
                 for (int i = 0; i < node->nPrimitives; ++i)
                     if (primitives[node->primitivesOffset + i]->Intersect(
                             ray, isect)) {
-                        ++nRayObjectIntersections;
                         hit = true;
                     }
                         
@@ -703,6 +702,7 @@ bool BVHAccel::Intersect(const Ray &ray, SurfaceInteraction *isect) const {
             currentNodeIndex = nodesToVisit[--toVisitOffset];
         }
     }
+    if (hit) ++nRayObjectIntersections;
     return hit;
 }
 

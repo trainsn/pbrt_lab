@@ -181,8 +181,8 @@ void StatsAccumulator::Print(FILE *dest) {
 
     for (auto &categories : toPrint) {
         fprintf(dest, "  %s\n", categories.first.c_str());
-        for (auto &item : categories.second)
-            fprintf(dest, "    %s\n", item.c_str());
+        //for (auto &item : categories.second)
+        //    fprintf(dest, "    %s\n", item.c_str());
     }
 }
 
